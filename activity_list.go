@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/mrdkvcs/go-base-backend/internal/database"
-	"net/http"
 )
 
 func (apiCfg *apiConfig) GetActivites(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -28,7 +30,7 @@ func (apiCfg *apiConfig) SetActivity(w http.ResponseWriter, r *http.Request, use
 		respondWithError(w, 400, fmt.Sprintf("Error decoding parameters: %v", err))
 		return
 	}
-	err = apiCfg.DB.SetActivity(r.Context(), database.SetActivityParams{
+	_, err = apiCfg.DB.SetActivity(r.Context(), database.SetActivityParams{
 		ID:           uuid.New(),
 		UserID:       user.ID,
 		Name:         params.Name,
@@ -92,24 +94,75 @@ func (apiCfg *apiConfig) EditActivity(w http.ResponseWriter, r *http.Request) {
 
 func (apiCfg *apiConfig) CheckActivityLogExists(w http.ResponseWriter, r *http.Request, user database.User) {
 	activity_id := r.URL.Query().Get("activity_id")
-	user_id := r.URL.Query().Get("user_id")
 	parsedActivityUUID, err := uuid.Parse(activity_id)
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error in parsing activity uuid: %s", err))
 		return
 	}
-	parsedUserUUID, err := uuid.Parse(user_id)
-	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("Error in parsing user uuid: %s", err))
-		return
-	}
 	activitylogExists, err := apiCfg.DB.CheckIfActivityLogExists(r.Context(), database.CheckIfActivityLogExistsParams{
-		UserID:     parsedUserUUID,
-		ActivityID: parsedActivityUUID,
+		UserID:     user.ID,
+		ActivityID: uuid.NullUUID{UUID: parsedActivityUUID, Valid: true},
 	})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Error checking if activity log exists: %s", err))
 		return
 	}
 	respondWithJson(w, 200, activitylogExists)
+}
+
+func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, user database.User) {
+	type parameters struct {
+		ActivityName        string `json:"activity_name"`
+		ActivityPoints      int32  `json:"activity_points"`
+		ActivityDuration    int32  `json:"activity_duration"`
+		ActivityDescription string `json:"activity_description"`
+		OneTime             string `json:"one_time"`
+	}
+	params := parameters{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error decoding request body %s", err))
+		return
+	}
+	if params.OneTime == "true" {
+		err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
+			ID:                  uuid.New(),
+			UserID:              user.ID,
+			ActivityID:          uuid.NullUUID{Valid: false},
+			Duration:            params.ActivityDuration,
+			Points:              params.ActivityPoints,
+			LoggedAt:            time.Now(),
+			ActivityDescription: params.ActivityDescription,
+		})
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error setting activity log %s", err))
+			return
+		}
+		return
+	}
+	activity, err := apiCfg.DB.SetActivity(r.Context(), database.SetActivityParams{
+		ID:           uuid.New(),
+		UserID:       user.ID,
+		Name:         params.ActivityName,
+		Points:       params.ActivityPoints,
+		ActivityType: "custom",
+	})
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error setting activity %s", err))
+		return
+	}
+	err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
+		ID:                  uuid.New(),
+		UserID:              user.ID,
+		ActivityID:          uuid.NullUUID{UUID: activity.ID, Valid: true},
+		Duration:            params.ActivityDuration,
+		Points:              params.ActivityPoints,
+		LoggedAt:            time.Now(),
+		ActivityDescription: params.ActivityDescription,
+	})
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error setting activity log %s", err))
+		return
+	}
 }

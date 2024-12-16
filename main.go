@@ -7,6 +7,8 @@ import (
 	"github.com/jub0bs/cors"
 	_ "github.com/lib/pq"
 	"github.com/mrdkvcs/go-base-backend/internal/database"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"net/http"
 	"os"
 )
@@ -20,6 +22,8 @@ var totalPoints int32 = 0
 var goalPoints int32 = 0
 var stopChan chan struct{} = make(chan struct{})
 var api_key string = ""
+var oauthConfig *oauth2.Config
+var jwtSecret string
 var extractSystemInstruction = `
 You are an assistant that extracts the core activity and duration from user input. Your goal is to interpret the user's activity and extract the duration in minutes. Before processing, translate the input into English to ensure accurate extraction. Focus on extracting the activity itself, and convert any time mentioned to the equivalent number of minutes. The output should be in the following structured format: Activity: <activity>, Duration: <duration>. The duration should be expressed as a number of minutes without any units or extra text.
 
@@ -59,27 +63,59 @@ func main() {
 	if err != nil {
 		fmt.Println("Error loading .env file")
 	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		fmt.Println("Couldnt get port number from .env file")
 	}
+
 	dbUrl := os.Getenv("DB_URL")
 	if dbUrl == "" {
 		fmt.Println("Could not find database url in .env file")
 	}
+
 	api_key = os.Getenv("OPENAI_API_KEY")
 	if api_key == "" {
 		fmt.Println("OPENAI_API_KEY environment variable is not set")
 		return
 	}
+
+	oauthClientId := os.Getenv("OAUTH_GOOGLE_CLIENT_ID")
+	if oauthClientId == "" {
+		fmt.Println("OAUTH_GOOGLE_CLIENT_ID environment variable is not set")
+		return
+	}
+
+	oauthClientSecret := os.Getenv("OAUTH_GOOGLE_CLIENT_SECRET")
+	if oauthClientSecret == "" {
+		fmt.Println("OAUTH_GOOGLE_CLIENT_SECRET environment variable is not set")
+		return
+	}
+
+	oauthConfig = &oauth2.Config{
+		ClientID:     oauthClientId,
+		ClientSecret: oauthClientSecret,
+		RedirectURL:  "http://localhost:5173/google/auth/callback",
+		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
+		Endpoint:     google.Endpoint,
+	}
+
+	if os.Getenv("JWT_SECRET") != "" {
+		jwtSecret = os.Getenv("JWT_SECRET")
+	} else {
+		fmt.Println("JWT_SECRET environment variable is not set")
+		return
+	}
+
 	db, err = sql.Open("postgres", dbUrl)
 	if err != nil {
 		fmt.Println("Could not connect to database")
 	}
+
 	apiConfig := apiConfig{DB: database.New(db)}
 	corsMw, err := cors.NewMiddleware(cors.Config{
 		Origins:        []string{"http://localhost:5173", "http://localhost:5174"},
-		Methods:        []string{"GET", "POST", "DELETE"},
+		Methods:        []string{"GET", "POST", "DELETE", "PUT"},
 		RequestHeaders: []string{"Authorization"},
 	})
 	if err != nil {
@@ -89,19 +125,25 @@ func main() {
 	router := http.NewServeMux()
 	router.HandleFunc("GET /ws", handleConnections)
 	router.HandleFunc("POST /register", apiConfig.CreateUser)
-	router.HandleFunc("POST /login", apiConfig.GetUserByEmail)
-	router.HandleFunc("GET /user/{id}", apiConfig.GetUserApiKey)
+	router.HandleFunc("POST /login", apiConfig.LogInUser)
+	router.HandleFunc("GET /user", apiConfig.middlewareAuth(apiConfig.GetUserByEmail))
+	router.HandleFunc("POST /google/auth/callback", apiConfig.googleCallback)
 	router.HandleFunc("GET /activities", apiConfig.middlewareAuth(apiConfig.GetActivites))
 	router.HandleFunc("POST /activities", apiConfig.middlewareAuth(apiConfig.SetActivity))
 	router.HandleFunc("DELETE /activities/{id}", apiConfig.DeleteActivity)
 	router.HandleFunc("PUT /activities/{id}", apiConfig.EditActivity)
 	router.HandleFunc("POST /activities/logs", apiConfig.middlewareAuth(apiConfig.SetActivityLog))
 	router.HandleFunc("POST /activities/logs/specific", apiConfig.middlewareAuth(apiConfig.SetSpecificActivityLog))
+	router.HandleFunc("POST /activities/logs/new", apiConfig.middlewareAuth(apiConfig.SetNewActivity))
 	router.HandleFunc("GET /activities/logs/exist", apiConfig.middlewareAuth(apiConfig.CheckActivityLogExists))
 	router.HandleFunc("GET /activities/daily/logs", apiConfig.middlewareAuth(apiConfig.GetDailyActivityLogs))
 	router.HandleFunc("GET /dailypoints", apiConfig.middlewareAuth(apiConfig.GetDailyPoints))
 	router.HandleFunc("POST /productivitystats", apiConfig.middlewareAuth(apiConfig.GetProductivityStats))
 	router.HandleFunc("POST /productivitygoals", apiConfig.middlewareAuth(apiConfig.SetProductivityGoal))
+	router.HandleFunc("POST /suggestFeature", apiConfig.middlewareAuth(apiConfig.createSuggestFeature))
+	router.HandleFunc("GET /suggestFeature", apiConfig.GetSuggestFeature)
+	router.HandleFunc("PUT /suggestFeature/upvote/{id}", apiConfig.SetSuggestFeatureUpVote)
+	router.HandleFunc("PUT /suggestFeature/downvote/{id}", apiConfig.SetSuggestFeatureDownVote)
 	router.HandleFunc("POST /teams", apiConfig.middlewareAuth(apiConfig.CreateTeam))
 	router.HandleFunc("GET /teams", apiConfig.middlewareAuth(apiConfig.GetUserTeams))
 	router.HandleFunc("GET /teams/{teamid}", apiConfig.GetTeamInfo)

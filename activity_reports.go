@@ -22,10 +22,28 @@ func (apiCfg *apiConfig) GetProductivityStats(w http.ResponseWriter, r *http.Req
 	params := parameters{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&params)
+
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Error decoding request body: %v", err))
 		return
 	}
+
+	productivityDays, err := apiCfg.DB.GetProductivityDays(r.Context(), database.GetProductivityDaysParams{
+		UserID:     user.ID,
+		LoggedAt:   params.StartTime,
+		LoggedAt_2: params.EndTime,
+	})
+
+	if len(productivityDays) == 0 {
+		respondWithJson(w, 200, []database.GetProductivityDaysRow{})
+		return
+	}
+
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Error getting productivity days: %v", err))
+		return
+	}
+
 	productivityPoints, err := apiCfg.DB.GetTotalAndAverageProductivityPoints(r.Context(), database.GetTotalAndAverageProductivityPointsParams{
 		UserID:     user.ID,
 		LoggedAt:   params.StartTime,
@@ -42,15 +60,6 @@ func (apiCfg *apiConfig) GetProductivityStats(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Error getting best productivity day: %v", err))
-		return
-	}
-	productivityDays, err := apiCfg.DB.GetProductivityDays(r.Context(), database.GetProductivityDaysParams{
-		UserID:     user.ID,
-		LoggedAt:   params.StartTime,
-		LoggedAt_2: params.EndTime,
-	})
-	if err != nil {
-		respondWithError(w, 500, fmt.Sprintf("Error getting productivity days: %v", err))
 		return
 	}
 	databaseProductivityStats := DatabaseProductivityStats{

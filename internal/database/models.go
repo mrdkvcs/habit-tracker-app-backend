@@ -5,6 +5,7 @@
 package database
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,14 @@ type CustomActivity struct {
 	Name       string
 	Points     int32
 	CreatedAt  time.Time
+}
+
+type SuggestFeature struct {
+	ID          uuid.UUID
+	Title       string
+	Description string
+	Username    string
+	Upvote      int32
 }
 
 type Team struct {
@@ -116,8 +125,8 @@ type User struct {
 	UpdatedAt    time.Time
 	Username     string
 	Email        string
-	PasswordHash string
-	ApiKey       string
+	PasswordHash sql.NullString
+	GoogleID     sql.NullString
 }
 
 type UserActivity struct {
@@ -133,7 +142,7 @@ type UserActivity struct {
 type UserActivityLog struct {
 	ID                  uuid.UUID
 	UserID              uuid.UUID
-	ActivityID          uuid.UUID
+	ActivityID          uuid.NullUUID
 	Duration            int32
 	Points              int32
 	ActivityDescription string
@@ -147,4 +156,5 @@ type UserGoal struct {
 	GoalPoints int32
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	Status     string
 }

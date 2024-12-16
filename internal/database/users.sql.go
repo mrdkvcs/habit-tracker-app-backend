@@ -7,15 +7,14 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id , created_at , updated_at , username , email , password_hash , api_key)
-VALUES ($1, $2, $3, $4 , $5 , $6 , encode(sha256(random()::text::bytea) , 'hex'))
-RETURNING id, created_at, updated_at, username, email, password_hash, api_key
+INSERT INTO users (id , created_at , updated_at , username , email , password_hash , google_id) VALUES ($1, $2, $3, $4 , $5 , $6 , $7) RETURNING id, created_at, updated_at, username, email, password_hash, google_id
 `
 
 type CreateUserParams struct {
@@ -24,7 +23,8 @@ type CreateUserParams struct {
 	UpdatedAt    time.Time
 	Username     string
 	Email        string
-	PasswordHash string
+	PasswordHash sql.NullString
+	GoogleID     sql.NullString
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
@@ -35,6 +35,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
+		arg.GoogleID,
 	)
 	var i User
 	err := row.Scan(
@@ -44,32 +45,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.ApiKey,
-	)
-	return i, err
-}
-
-const getUserByApikey = `-- name: GetUserByApikey :one
-SELECT id, created_at, updated_at, username, email, password_hash, api_key FROM users WHERE api_key = $1
-`
-
-func (q *Queries) GetUserByApikey(ctx context.Context, apiKey string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByApikey, apiKey)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Username,
-		&i.Email,
-		&i.PasswordHash,
-		&i.ApiKey,
+		&i.GoogleID,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, created_at, updated_at, username, email, password_hash, api_key FROM users WHERE email = $1
+SELECT id, created_at, updated_at, username, email, password_hash, google_id FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -82,7 +64,26 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.ApiKey,
+		&i.GoogleID,
+	)
+	return i, err
+}
+
+const getUserByGoogleId = `-- name: GetUserByGoogleId :one
+SELECT id, created_at, updated_at, username, email, password_hash, google_id FROM users WHERE google_id = $1
+`
+
+func (q *Queries) GetUserByGoogleId(ctx context.Context, googleID sql.NullString) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByGoogleId, googleID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.GoogleID,
 	)
 	return i, err
 }

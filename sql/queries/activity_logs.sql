@@ -14,14 +14,14 @@ VALUES
 -- name: GetActivities :many
 SELECT id , name , points , activity_type FROM user_activities WHERE user_id = $1 ORDER BY points DESC;
 
--- name: SetActivity :exec
-INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 );
+-- name: SetActivity :one
+INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 ) RETURNING *;
 
 -- name: SetActivityLog :exec
 INSERT INTO user_activity_logs (id , user_id , activity_id , duration , points , logged_at , activity_description  ) VALUES ($1 , $2 , $3 , $4 , $5 , $6 , $7  ); 
 
 -- name: GetDailyActivityLogs :many
-SELECT activity_id , ua.name ,  duration , user_activity_logs.points , activity_description FROM user_activity_logs JOIN user_activities ua ON ua.id = user_activity_logs.activity_id WHERE user_activity_logs.user_id = $1 AND DATE(logged_at) = CURRENT_DATE;
+SELECT activity_id , ua.name ,  duration , user_activity_logs.points , activity_description FROM user_activity_logs LEFT  JOIN user_activities ua ON ua.id = user_activity_logs.activity_id WHERE user_activity_logs.user_id = $1 AND DATE(logged_at) = CURRENT_DATE;
 
 -- name: GetDailyPoints :one
 --

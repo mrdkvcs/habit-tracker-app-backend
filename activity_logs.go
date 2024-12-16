@@ -81,9 +81,10 @@ func compareActivities(extractedActivity string, databaseActivity string) (bool,
 }
 
 type MatchedActivities struct {
-	MatchedActivities []Activity `json:"matched_activities"`
-	Duration          int        `json:"duration"`
-	Description       string     `json:"description"`
+	MatchedActivities []Activity  `json:"matched_activities"`
+	Duration          int         `json:"duration"`
+	Description       string      `json:"description"`
+	Name              interface{} `json:"name"`
 }
 
 func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -142,7 +143,7 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 		err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
 			ID:                  uuid.New(),
 			UserID:              user.ID,
-			ActivityID:          matchedActivities[0].ActivityID,
+			ActivityID:          uuid.NullUUID{UUID: matchedActivities[0].ActivityID, Valid: true},
 			Duration:            int32(duration),
 			Points:              int32(roundedPoints),
 			ActivityDescription: params.ActivityInput,
@@ -152,14 +153,32 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 			respondWithError(w, 400, fmt.Sprintf("Error setting activity log: %v", err))
 			return
 		}
-		respondWithJson(w, 200, matchedActivities)
+		isGoalCompleted := totalPoints > goalPoints
+		totalPoints = totalPoints + int32(roundedPoints)
+		if totalPoints > goalPoints && !isGoalCompleted {
+			stopChan <- struct{}{}
+			err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
+				return
+			}
+		}
+		if goalPoints > totalPoints && isGoalCompleted {
+			err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+				return
+			}
+			startGoalTracker(user.ID, user.Email)
+		}
+		respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities})
 		return
 	}
 	if matchCounter > 1 {
 		respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities, Duration: duration, Description: params.ActivityInput})
 		return
 	}
-	respondWithError(w, 400, "You tried to set an unknown activity , make sure the activity is set in your activity list")
+	respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities, Duration: duration, Description: params.ActivityInput, Name: activity})
 }
 
 func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -182,18 +201,40 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 		respondWithError(w, 400, fmt.Sprintf("Error in parsing activity uuid: %s", err))
 		return
 	}
+	pointsInMinutes := float64(params.ActivityPoints) / float64(60)
+	points := float64(params.ActivityDuration) * float64(pointsInMinutes)
+	roundedPoints := math.Round(points)
 	err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
 		ID:                  uuid.New(),
 		UserID:              user.ID,
-		ActivityID:          activityUUID,
+		ActivityID:          uuid.NullUUID{UUID: activityUUID, Valid: true},
 		Duration:            params.ActivityDuration,
-		Points:              params.ActivityPoints,
+		Points:              int32(roundedPoints),
 		ActivityDescription: params.ActivityDescription,
 		LoggedAt:            time.Now(),
 	})
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error setting activity log: %v", err))
 		return
+	}
+	isGoalCompleted := totalPoints > goalPoints
+	totalPoints = totalPoints + int32(roundedPoints)
+	if totalPoints > goalPoints && !isGoalCompleted {
+		stopChan <- struct{}{}
+		err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
+			return
+		}
+		return
+	}
+	if goalPoints > totalPoints && isGoalCompleted {
+		err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+			return
+		}
+		startGoalTracker(user.ID, user.Email)
 	}
 }
 

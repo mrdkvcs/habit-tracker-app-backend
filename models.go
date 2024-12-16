@@ -7,19 +7,26 @@ import (
 )
 
 type User struct {
-	ID           uuid.UUID `json:"id"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Username     string    `json:"username"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"password_hash"`
-	ApiKey       string    `json:"api_key"`
+	ID           uuid.UUID   `json:"id"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	Username     string      `json:"username"`
+	Email        string      `json:"email"`
+	PasswordHash interface{} `json:"password_hash"`
+	GoogleID     interface{} `json:"google_id"`
 }
 
 type SearchedUser struct {
 	ID             uuid.UUID `json:"id"`
 	Username       string    `json:"username"`
 	HasBeenInvited bool      `json:"has_been_invited"`
+}
+type SuggestFeature struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Username    string    `json:"username"`
+	Upvote      int32     `json:"upvote"`
 }
 
 type Activity struct {
@@ -30,11 +37,11 @@ type Activity struct {
 }
 
 type ActivityLog struct {
-	ID                  uuid.UUID `json:"id"`
-	Duration            int32     `json:"duration"`
-	Name                string    `json:"name"`
-	Points              int32     `json:"points"`
-	ActivityDescription string    `json:"activity_description"`
+	ID                  uuid.NullUUID `json:"id"`
+	Duration            int32         `json:"duration"`
+	Name                interface{}   `json:"name"`
+	Points              int32         `json:"points"`
+	ActivityDescription string        `json:"activity_description"`
 }
 
 type TotalAndAveragePoints struct {
@@ -45,11 +52,17 @@ type TotalAndAveragePoints struct {
 type ProductivityDay struct {
 	Date        time.Time   `json:"date"`
 	TotalPoints interface{} `json:"total_points"`
+	Status      string      `json:"status"`
+}
+
+type BestProductivityDay struct {
+	Date        time.Time   `json:"date"`
+	TotalPoints interface{} `json:"total_points"`
 }
 
 type ProductivityStats struct {
 	ProductivvityPoints TotalAndAveragePoints `json:"productivity_points"`
-	BestProductivityDay ProductivityDay       `json:"best_productivity_day"`
+	BestProductivityDay BestProductivityDay   `json:"best_productivity_day"`
 	ProductivityDays    []ProductivityDay     `json:"productivity_days"`
 }
 
@@ -116,11 +129,25 @@ type TeamInvitation struct {
 	TeamSize     int32     `json:"team_size"`
 }
 
+func databaseSuggestFeaturesToSuggestFeatures(dbSuggestFeatures []database.SuggestFeature) []SuggestFeature {
+	suggestFeatures := []SuggestFeature{}
+	for _, dbSuggestFeature := range dbSuggestFeatures {
+		suggestFeature := SuggestFeature{ID: dbSuggestFeature.ID, Title: dbSuggestFeature.Title, Description: dbSuggestFeature.Description, Username: dbSuggestFeature.Username, Upvote: dbSuggestFeature.Upvote}
+		suggestFeatures = append(suggestFeatures, suggestFeature)
+	}
+	return suggestFeatures
+}
+
 func databaseActivityLogsToActivityLogs(dbDailyActivityLogs []database.GetDailyActivityLogsRow) []ActivityLog {
 	dailyActivityLogs := []ActivityLog{}
 	for _, dbDailyActivityLog := range dbDailyActivityLogs {
-		dailyActivityLog := ActivityLog{ID: dbDailyActivityLog.ActivityID, Duration: dbDailyActivityLog.Duration, Name: dbDailyActivityLog.Name, Points: dbDailyActivityLog.Points, ActivityDescription: dbDailyActivityLog.ActivityDescription}
-		dailyActivityLogs = append(dailyActivityLogs, dailyActivityLog)
+		if dbDailyActivityLog.Name.Valid {
+			dailyActivityLog := ActivityLog{ID: dbDailyActivityLog.ActivityID, Duration: dbDailyActivityLog.Duration, Name: dbDailyActivityLog.Name.String, Points: dbDailyActivityLog.Points, ActivityDescription: dbDailyActivityLog.ActivityDescription}
+			dailyActivityLogs = append(dailyActivityLogs, dailyActivityLog)
+		} else {
+			dailyActivityLog := ActivityLog{ID: dbDailyActivityLog.ActivityID, Duration: dbDailyActivityLog.Duration, Name: nil, Points: dbDailyActivityLog.Points, ActivityDescription: dbDailyActivityLog.ActivityDescription}
+			dailyActivityLogs = append(dailyActivityLogs, dailyActivityLog)
+		}
 	}
 	return dailyActivityLogs
 }
@@ -238,13 +265,13 @@ func DatabaseDailyPointsToDailyPoints(DbDailyPoints database.GetDailyPointsRow) 
 func databaseProductivityStatsToProductivityStats(productivityStats DatabaseProductivityStats) ProductivityStats {
 	productivityDays := []ProductivityDay{}
 	for _, productivityDay := range productivityStats.ProductivityDays {
-		productivityDays = append(productivityDays, ProductivityDay{Date: productivityDay.Date, TotalPoints: productivityDay.TotalPoints})
+		productivityDays = append(productivityDays, ProductivityDay{Date: productivityDay.Date, TotalPoints: productivityDay.TotalPoints, Status: productivityDay.Status})
 	}
 	totalAveragePoints := TotalAndAveragePoints{
 		TotalPoints:   productivityStats.ProductivityPoints.TotalPoints,
 		AveragePoints: productivityStats.ProductivityPoints.AveragePointsPerDay,
 	}
-	bestProductivityDay := ProductivityDay{
+	bestProductivityDay := BestProductivityDay{
 		Date:        productivityStats.BestProductivityDay.Date,
 		TotalPoints: productivityStats.BestProductivityDay.TotalPoints,
 	}
@@ -268,13 +295,24 @@ func databaseActivityToActivity(dbAcc database.GetActivitiesRow) Activity {
 }
 
 func databaseUserToUser(dbuser database.User) User {
+	if dbuser.PasswordHash.Valid {
+		return User{
+			ID:           dbuser.ID,
+			CreatedAt:    dbuser.CreatedAt,
+			UpdatedAt:    dbuser.UpdatedAt,
+			Username:     dbuser.Username,
+			Email:        dbuser.Email,
+			PasswordHash: dbuser.PasswordHash.String,
+			GoogleID:     nil,
+		}
+	}
 	return User{
 		ID:           dbuser.ID,
 		CreatedAt:    dbuser.CreatedAt,
 		UpdatedAt:    dbuser.UpdatedAt,
 		Username:     dbuser.Username,
 		Email:        dbuser.Email,
-		PasswordHash: dbuser.PasswordHash,
-		ApiKey:       dbuser.ApiKey,
+		PasswordHash: nil,
+		GoogleID:     dbuser.GoogleID.String,
 	}
 }

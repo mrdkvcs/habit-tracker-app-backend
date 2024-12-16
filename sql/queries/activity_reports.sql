@@ -22,8 +22,9 @@ LIMIT 1;
 
 -- name: GetProductivityDays :many
 
-SELECT DATE(logged_at) AS date , COALESCE(SUM(points ) , 0) AS total_points
+SELECT DATE(logged_at) AS date , COALESCE(user_goals.status , 'no goal'),  COALESCE(SUM(points ) , 0) AS total_points
 FROM user_activity_logs
-WHERE user_id = $1 AND logged_at >= $2 AND logged_at < $3
-GROUP BY DATE(logged_at)
+LEFT JOIN user_goals ON user_goals.user_id = $1 AND user_goals.goal_date = DATE(logged_at)
+WHERE user_activity_logs.user_id = $1 AND logged_at >= $2 AND logged_at < $3
+GROUP BY DATE(logged_at), COALESCE(user_goals.status , 'no goal')
 ORDER BY DATE(logged_at);

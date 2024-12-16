@@ -12,6 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
+const setGoalCompleted = `-- name: SetGoalCompleted :exec
+
+UPDATE user_goals SET status = 'completed' WHERE user_id = $1 AND goal_date = CURRENT_DATE
+RETURNING id, user_id, goal_date, goal_points, created_at, updated_at, status
+`
+
+func (q *Queries) SetGoalCompleted(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, setGoalCompleted, userID)
+	return err
+}
+
+const setGoalUnCompleted = `-- name: SetGoalUnCompleted :exec
+
+UPDATE user_goals SET status = 'not completed' WHERE user_id = $1 AND goal_date = CURRENT_DATE
+RETURNING id, user_id, goal_date, goal_points, created_at, updated_at, status
+`
+
+func (q *Queries) SetGoalUnCompleted(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, setGoalUnCompleted, userID)
+	return err
+}
+
 const setProductivityGoal = `-- name: SetProductivityGoal :exec
 
 INSERT INTO user_goals (user_id , goal_date , goal_points) VALUES ($1, $2, $3)

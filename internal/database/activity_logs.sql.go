@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ SELECT EXISTS (
 
 type CheckIfActivityLogExistsParams struct {
 	UserID     uuid.UUID
-	ActivityID uuid.UUID
+	ActivityID uuid.NullUUID
 }
 
 func (q *Queries) CheckIfActivityLogExists(ctx context.Context, arg CheckIfActivityLogExistsParams) (bool, error) {
@@ -95,12 +96,12 @@ func (q *Queries) GetActivities(ctx context.Context, userID uuid.UUID) ([]GetAct
 }
 
 const getDailyActivityLogs = `-- name: GetDailyActivityLogs :many
-SELECT activity_id , ua.name ,  duration , user_activity_logs.points , activity_description FROM user_activity_logs JOIN user_activities ua ON ua.id = user_activity_logs.activity_id WHERE user_activity_logs.user_id = $1 AND DATE(logged_at) = CURRENT_DATE
+SELECT activity_id , ua.name ,  duration , user_activity_logs.points , activity_description FROM user_activity_logs LEFT  JOIN user_activities ua ON ua.id = user_activity_logs.activity_id WHERE user_activity_logs.user_id = $1 AND DATE(logged_at) = CURRENT_DATE
 `
 
 type GetDailyActivityLogsRow struct {
-	ActivityID          uuid.UUID
-	Name                string
+	ActivityID          uuid.NullUUID
+	Name                sql.NullString
 	Duration            int32
 	Points              int32
 	ActivityDescription string
@@ -174,8 +175,8 @@ func (q *Queries) GetDailyPoints(ctx context.Context, userID uuid.UUID) (GetDail
 	return i, err
 }
 
-const setActivity = `-- name: SetActivity :exec
-INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 )
+const setActivity = `-- name: SetActivity :one
+INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 ) RETURNING id, user_id, name, points, activity_type, created_at, updated_at
 `
 
 type SetActivityParams struct {
@@ -186,15 +187,25 @@ type SetActivityParams struct {
 	ActivityType string
 }
 
-func (q *Queries) SetActivity(ctx context.Context, arg SetActivityParams) error {
-	_, err := q.db.ExecContext(ctx, setActivity,
+func (q *Queries) SetActivity(ctx context.Context, arg SetActivityParams) (UserActivity, error) {
+	row := q.db.QueryRowContext(ctx, setActivity,
 		arg.ID,
 		arg.UserID,
 		arg.Name,
 		arg.Points,
 		arg.ActivityType,
 	)
-	return err
+	var i UserActivity
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Points,
+		&i.ActivityType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const setActivityLog = `-- name: SetActivityLog :exec
@@ -204,7 +215,7 @@ INSERT INTO user_activity_logs (id , user_id , activity_id , duration , points ,
 type SetActivityLogParams struct {
 	ID                  uuid.UUID
 	UserID              uuid.UUID
-	ActivityID          uuid.UUID
+	ActivityID          uuid.NullUUID
 	Duration            int32
 	Points              int32
 	LoggedAt            time.Time
