@@ -80,6 +80,7 @@ func (apiCfg *apiConfig) googleCallback(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		respondWithJson(w, 200, jwtTokenResponse{Token: jwtToken})
+		return
 	} else if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("DB Error: Couldnt get user by google id: %s", err))
 		return
