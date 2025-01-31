@@ -94,17 +94,22 @@ func compareActivities(extractedActivity string, databaseActivity string) (bool,
 	return true, nil
 }
 
-type MatchedActivities struct {
+type ActivityLogResponse struct {
 	MatchedActivities []Activity `json:"matched_activities"`
 	Duration          int        `json:"duration"`
 	Description       string     `json:"description"`
 	Name              string     `json:"name"`
+	StreakCount       int32      `json:"streak_count"`
+	IsStreakRecord    bool       `json:"is_streak_record"`
 }
 
 func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, user database.User) {
+
 	type parameters struct {
 		ActivityInput string `json:"activity_input"`
 	}
+
+	isStreakRecord := false
 	params := parameters{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&params)
@@ -214,6 +219,7 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 				streakInfo.CurrentStreak = 1
 			}
 			if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+				isStreakRecord = true
 				streakInfo.LongestStreak = streakInfo.CurrentStreak
 			}
 			err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
@@ -226,18 +232,21 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 				respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
 				return
 			}
+			respondWithJson(w, 200, ActivityLogResponse{MatchedActivities: matchedActivities, StreakCount: streakInfo.CurrentStreak, IsStreakRecord: isStreakRecord})
+			return
 		}
-		respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities})
+		respondWithJson(w, 200, ActivityLogResponse{MatchedActivities: matchedActivities})
 		return
 	}
 	if matchCounter > 1 {
-		respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities, Duration: duration, Description: params.ActivityInput})
+		respondWithJson(w, 200, ActivityLogResponse{MatchedActivities: matchedActivities, Duration: duration, Description: params.ActivityInput})
 		return
 	}
-	respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities, Duration: duration, Description: params.ActivityInput, Name: activity})
+	respondWithJson(w, 200, ActivityLogResponse{MatchedActivities: matchedActivities, Duration: duration, Description: params.ActivityInput, Name: activity})
 }
 
 func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.Request, user database.User) {
+
 	type parameters struct {
 		ActivityID          string `json:"activity_id"`
 		ActivityName        string `json:"activity_name"`
@@ -245,6 +254,9 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 		ActivityDuration    int32  `json:"activity_duration"`
 		ActivityDescription string `json:"activity_description"`
 	}
+
+	isStreakRecord := false
+
 	params := parameters{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&params)
@@ -252,14 +264,17 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 		respondWithError(w, 400, fmt.Sprintf("Error in parsing json: %s", err))
 		return
 	}
+
 	activityUUID, err := uuid.Parse(params.ActivityID)
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error in parsing activity uuid: %s", err))
 		return
 	}
+
 	pointsInMinutes := float64(params.ActivityPoints) / float64(60)
 	points := float64(params.ActivityDuration) * float64(pointsInMinutes)
 	roundedPoints := math.Round(points)
+
 	err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
 		ID:                  uuid.New(),
 		UserID:              user.ID,
@@ -269,6 +284,7 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 		ActivityDescription: params.ActivityDescription,
 		LoggedAt:            time.Now(),
 	})
+
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error setting activity log: %v", err))
 		return
@@ -319,6 +335,7 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 			streakInfo.CurrentStreak = 1
 		}
 		if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+			isStreakRecord = true
 			streakInfo.LongestStreak = streakInfo.CurrentStreak
 		}
 		err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
@@ -331,8 +348,11 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 			respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
 			return
 		}
+		respondWithJson(w, 200, ActivityLogResponse{StreakCount: streakInfo.CurrentStreak, IsStreakRecord: isStreakRecord})
+		return
 	}
-
+	respondWithJson(w, 200, ActivityLogResponse{})
+	return
 }
 
 func (apiCfg *apiConfig) GetDailyActivityLogs(w http.ResponseWriter, r *http.Request, user database.User) {

@@ -113,6 +113,7 @@ func (apiCfg *apiConfig) CheckActivityLogExists(w http.ResponseWriter, r *http.R
 }
 
 func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, user database.User) {
+
 	type parameters struct {
 		ActivityName        string `json:"activity_name"`
 		ActivityPoints      int32  `json:"activity_points"`
@@ -120,6 +121,7 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 		ActivityDescription string `json:"activity_description"`
 		OneTime             string `json:"one_time"`
 	}
+	isStreakRecord := false
 	params := parameters{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&params)
@@ -190,6 +192,7 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 				streakInfo.CurrentStreak = 1
 			}
 			if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+				isStreakRecord = true
 				streakInfo.LongestStreak = streakInfo.CurrentStreak
 			}
 			err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
@@ -202,7 +205,10 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 				respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
 				return
 			}
+			respondWithJson(w, 200, ActivityLogResponse{StreakCount: streakInfo.CurrentStreak, IsStreakRecord: isStreakRecord})
+			return
 		}
+		respondWithJson(w, 200, ActivityLogResponse{})
 		return
 	}
 	activity, err := apiCfg.DB.SetActivity(r.Context(), database.SetActivityParams{
@@ -276,6 +282,7 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 			streakInfo.CurrentStreak = 1
 		}
 		if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+			isStreakRecord = true
 			streakInfo.LongestStreak = streakInfo.CurrentStreak
 		}
 		err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
@@ -288,5 +295,9 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 			respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
 			return
 		}
+		respondWithJson(w, 200, ActivityLogResponse{StreakCount: streakInfo.CurrentStreak, IsStreakRecord: isStreakRecord})
+		return
 	}
+	respondWithJson(w, 200, ActivityLogResponse{})
+	return
 }
