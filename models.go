@@ -60,15 +60,39 @@ type BestProductivityDay struct {
 	TotalPoints interface{} `json:"total_points"`
 }
 
-type ProductivityStats struct {
-	ProductivvityPoints TotalAndAveragePoints `json:"productivity_points"`
-	BestProductivityDay BestProductivityDay   `json:"best_productivity_day"`
-	ProductivityDays    []ProductivityDay     `json:"productivity_days"`
+type ProductiveUnProductiveTime struct {
+	ProductiveTime   int64 `json:"productive_time"`
+	UnproductiveTime int64 `json:"unproductive_time"`
 }
 
-type DailyPoints struct {
-	TotalPoints interface{} `json:"total_points"`
-	GoalPoints  interface{} `json:"goal_points"`
+type ProductivityStats struct {
+	ProductivvityPoints        TotalAndAveragePoints      `json:"productivity_points"`
+	BestProductivityDay        BestProductivityDay        `json:"best_productivity_day"`
+	ProductivityDays           []ProductivityDay          `json:"productivity_days"`
+	ProductiveUnProductiveTime ProductiveUnProductiveTime `json:"time"`
+}
+
+type DailyProductiveTime struct {
+	ProductiveTime   interface{} `json:"productive_time"`
+	UnproductiveTime interface{} `json:"unproductive_time"`
+}
+
+type RecentActivity struct {
+	Duration            int32       `json:"duration"`
+	Name                interface{} `json:"name"`
+	Points              int32       `json:"points"`
+	ActivityDescription string      `json:"activity_description"`
+}
+
+type DailyStats struct {
+	TotalPoints            interface{}         `json:"total_points"`
+	GoalPoints             interface{}         `json:"goal_points"`
+	DailyProductiveTime    DailyProductiveTime `json:"daily_productive_time"`
+	RecentActivities       []RecentActivity    `json:"recent_activities"`
+	DailyActivityLogsCount int64               `json:"daily_activity_logs_count"`
+	CurrentStreak          int32               `json:"current_streak"`
+	LongestStreak          int32               `json:"longest_streak"`
+	StreakMessage          string              `json:"streak_message"`
 }
 
 type Team struct {
@@ -255,10 +279,30 @@ func databaseTeamToTeam(dbteam database.Team) Team {
 	}
 }
 
-func DatabaseDailyPointsToDailyPoints(DbDailyPoints database.GetDailyPointsRow) DailyPoints {
-	return DailyPoints{
-		TotalPoints: DbDailyPoints.TotalPoints,
-		GoalPoints:  DbDailyPoints.GoalPoints,
+func DatabaseDailyStatsToDailyStats(DBDailyStats DBDailyStats) DailyStats {
+	dailyProductiveTime := DailyProductiveTime{
+		ProductiveTime:   DBDailyStats.DailyProductiveTime.ProductiveTime,
+		UnproductiveTime: DBDailyStats.DailyProductiveTime.UnproductiveTime,
+	}
+	recentActivities := []RecentActivity{}
+	for _, dbRecentActivity := range DBDailyStats.RecentActivities {
+		if dbRecentActivity.Name.Valid {
+			recentActivity := RecentActivity{Duration: dbRecentActivity.Duration, Name: dbRecentActivity.Name.String, Points: dbRecentActivity.Points, ActivityDescription: dbRecentActivity.ActivityDescription}
+			recentActivities = append(recentActivities, recentActivity)
+		} else {
+			recentActivity := RecentActivity{Duration: dbRecentActivity.Duration, Name: nil, Points: dbRecentActivity.Points, ActivityDescription: dbRecentActivity.ActivityDescription}
+			recentActivities = append(recentActivities, recentActivity)
+		}
+	}
+	return DailyStats{
+		TotalPoints:            DBDailyStats.TotalPoints,
+		GoalPoints:             DBDailyStats.GoalPoints,
+		DailyProductiveTime:    dailyProductiveTime,
+		RecentActivities:       recentActivities,
+		DailyActivityLogsCount: DBDailyStats.DailyActivityLogsCount,
+		CurrentStreak:          DBDailyStats.CurrentStreak,
+		LongestStreak:          DBDailyStats.LongestStreak,
+		StreakMessage:          DBDailyStats.StreakMessage,
 	}
 }
 
@@ -275,10 +319,15 @@ func databaseProductivityStatsToProductivityStats(productivityStats DatabaseProd
 		Date:        productivityStats.BestProductivityDay.Date,
 		TotalPoints: productivityStats.BestProductivityDay.TotalPoints,
 	}
+	productiveUnproductiveTime := ProductiveUnProductiveTime{
+		ProductiveTime:   productivityStats.ProductiveUnProductiveTime.ProductiveTime,
+		UnproductiveTime: productivityStats.ProductiveUnProductiveTime.UnproductiveTime,
+	}
 	return ProductivityStats{
-		ProductivvityPoints: totalAveragePoints,
-		BestProductivityDay: bestProductivityDay,
-		ProductivityDays:    productivityDays,
+		ProductivvityPoints:        totalAveragePoints,
+		BestProductivityDay:        bestProductivityDay,
+		ProductivityDays:           productivityDays,
+		ProductiveUnProductiveTime: productiveUnproductiveTime,
 	}
 }
 

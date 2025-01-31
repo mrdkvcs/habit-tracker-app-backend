@@ -1,13 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/mrdkvcs/go-base-backend/internal/database"
+	"log"
+	"math"
+	"net/http"
+	"time"
 )
 
 func (apiCfg *apiConfig) GetActivites(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -126,18 +128,80 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if params.OneTime == "true" {
+		pointsPerMinutes := float64(params.ActivityPoints) / float64(60)
+		points := float64(params.ActivityDuration) * float64(pointsPerMinutes)
+		roundedPoints := math.Round(points)
 		err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
 			ID:                  uuid.New(),
 			UserID:              user.ID,
 			ActivityID:          uuid.NullUUID{Valid: false},
 			Duration:            params.ActivityDuration,
-			Points:              params.ActivityPoints,
+			Points:              int32(roundedPoints),
 			LoggedAt:            time.Now(),
 			ActivityDescription: params.ActivityDescription,
 		})
 		if err != nil {
 			respondWithError(w, 400, fmt.Sprintf("Error setting activity log %s", err))
 			return
+		}
+
+		dailyPoints, err := apiCfg.DB.GetDailyPoints(r.Context(), user.ID)
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error getting daily points: %v", err))
+			return
+		}
+
+		if dailyPoints.GoalPoints > 0 {
+			isGoalCompleted := dailyPoints.TotalPoints > dailyPoints.GoalPoints
+			dailyPoints.TotalPoints = dailyPoints.TotalPoints + params.ActivityPoints
+			if dailyPoints.TotalPoints > dailyPoints.GoalPoints && !isGoalCompleted {
+				stopChan <- struct{}{}
+				err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
+				if err != nil {
+					respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
+					return
+				}
+				return
+			}
+			if dailyPoints.GoalPoints > dailyPoints.TotalPoints && isGoalCompleted {
+				err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
+				if err != nil {
+					respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+					return
+				}
+				startGoalTracker(user.ID, user.Email)
+			}
+		}
+		dailyActivityLogCount, err := apiCfg.DB.GetDailyActivityLogsCount(r.Context(), user.ID)
+		if err != nil {
+			log.Printf("Error getting daily activity logs count: %s", err)
+		}
+
+		if dailyActivityLogCount == 1 {
+			streakInfo, err := apiCfg.DB.GetStreakData(r.Context(), user.ID)
+			if err != nil && err != sql.ErrNoRows {
+				respondWithError(w, 400, fmt.Sprintf("Error getting streak info: %v", err))
+				return
+			}
+			yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+			if streakInfo.LastLoggedDate.Valid && streakInfo.LastLoggedDate.Time.Format("2006-01-02") == yesterday {
+				streakInfo.CurrentStreak += 1
+			} else {
+				streakInfo.CurrentStreak = 1
+			}
+			if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+				streakInfo.LongestStreak = streakInfo.CurrentStreak
+			}
+			err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
+				UserID:         user.ID,
+				CurrentStreak:  streakInfo.CurrentStreak,
+				LongestStreak:  streakInfo.LongestStreak,
+				LastLoggedDate: sql.NullTime{Valid: true, Time: time.Now()},
+			})
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
+				return
+			}
 		}
 		return
 	}
@@ -152,17 +216,77 @@ func (apiCfg *apiConfig) SetNewActivity(w http.ResponseWriter, r *http.Request, 
 		respondWithError(w, 400, fmt.Sprintf("Error setting activity %s", err))
 		return
 	}
+	pointsPerMinutes := float64(params.ActivityPoints) / float64(60)
+	points := float64(params.ActivityDuration) * float64(pointsPerMinutes)
+	roundedPoints := math.Round(points)
 	err = apiCfg.DB.SetActivityLog(r.Context(), database.SetActivityLogParams{
 		ID:                  uuid.New(),
 		UserID:              user.ID,
 		ActivityID:          uuid.NullUUID{UUID: activity.ID, Valid: true},
 		Duration:            params.ActivityDuration,
-		Points:              params.ActivityPoints,
+		Points:              int32(roundedPoints),
 		LoggedAt:            time.Now(),
 		ActivityDescription: params.ActivityDescription,
 	})
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error setting activity log %s", err))
 		return
+	}
+	dailyPoints, err := apiCfg.DB.GetDailyPoints(r.Context(), user.ID)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error getting daily points: %v", err))
+		return
+	}
+	if dailyPoints.GoalPoints > 0 {
+		isGoalCompleted := dailyPoints.TotalPoints > dailyPoints.GoalPoints
+		dailyPoints.TotalPoints = dailyPoints.TotalPoints + params.ActivityPoints
+		if dailyPoints.TotalPoints > dailyPoints.GoalPoints && !isGoalCompleted {
+			stopChan <- struct{}{}
+			err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
+				return
+			}
+			return
+		}
+		if dailyPoints.GoalPoints > dailyPoints.TotalPoints && isGoalCompleted {
+			err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+				return
+			}
+			startGoalTracker(user.ID, user.Email)
+		}
+	}
+	dailyActivityLogCount, err := apiCfg.DB.GetDailyActivityLogsCount(r.Context(), user.ID)
+	if err != nil {
+		log.Printf("Error getting daily activity logs count: %s", err)
+	}
+
+	if dailyActivityLogCount == 1 {
+		streakInfo, err := apiCfg.DB.GetStreakData(r.Context(), user.ID)
+		if err != nil && err != sql.ErrNoRows {
+			respondWithError(w, 400, fmt.Sprintf("Error getting streak info: %v", err))
+			return
+		}
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		if streakInfo.LastLoggedDate.Valid && streakInfo.LastLoggedDate.Time.Format("2006-01-02") == yesterday {
+			streakInfo.CurrentStreak += 1
+		} else {
+			streakInfo.CurrentStreak = 1
+		}
+		if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+			streakInfo.LongestStreak = streakInfo.CurrentStreak
+		}
+		err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
+			UserID:         user.ID,
+			CurrentStreak:  streakInfo.CurrentStreak,
+			LongestStreak:  streakInfo.LongestStreak,
+			LastLoggedDate: sql.NullTime{Valid: true, Time: time.Now()},
+		})
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
+			return
+		}
 	}
 }

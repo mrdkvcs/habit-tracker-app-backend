@@ -9,9 +9,10 @@ import (
 )
 
 type DatabaseProductivityStats struct {
-	ProductivityPoints  database.GetTotalAndAverageProductivityPointsRow
-	BestProductivityDay database.GetBestProductivityDayRow
-	ProductivityDays    []database.GetProductivityDaysRow
+	ProductivityPoints         database.GetTotalAndAverageProductivityPointsRow
+	BestProductivityDay        database.GetBestProductivityDayRow
+	ProductivityDays           []database.GetProductivityDaysRow
+	ProductiveUnProductiveTime database.GetProductiveUnProductiveTimeRow
 }
 
 func (apiCfg *apiConfig) GetProductivityStats(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -62,10 +63,16 @@ func (apiCfg *apiConfig) GetProductivityStats(w http.ResponseWriter, r *http.Req
 		respondWithError(w, 500, fmt.Sprintf("Error getting best productivity day: %v", err))
 		return
 	}
+	productiveUnproductiveTime, err := apiCfg.DB.GetProductiveUnProductiveTime(r.Context(), database.GetProductiveUnProductiveTimeParams{
+		LoggedAt:   params.StartTime,
+		LoggedAt_2: params.EndTime,
+		UserID:     user.ID,
+	})
 	databaseProductivityStats := DatabaseProductivityStats{
-		ProductivityPoints:  productivityPoints,
-		BestProductivityDay: bestProductivityDay,
-		ProductivityDays:    productivityDays,
+		ProductivityPoints:         productivityPoints,
+		BestProductivityDay:        bestProductivityDay,
+		ProductivityDays:           productivityDays,
+		ProductiveUnProductiveTime: productiveUnproductiveTime,
 	}
 	respondWithJson(w, 200, databaseProductivityStatsToProductivityStats(databaseProductivityStats))
 }

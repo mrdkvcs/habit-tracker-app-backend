@@ -2,17 +2,31 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/mrdkvcs/go-base-backend/internal/database"
-	openai "github.com/sashabaranov/go-openai"
+	"log"
 	"math"
 	"net/http"
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/mrdkvcs/go-base-backend/internal/database"
+	openai "github.com/sashabaranov/go-openai"
 )
+
+type DBDailyStats struct {
+	TotalPoints            interface{}
+	GoalPoints             interface{}
+	DailyProductiveTime    database.GetDailyProductiveTimeRow
+	RecentActivities       []database.GetRecentActivitiesRow
+	DailyActivityLogsCount int64
+	CurrentStreak          int32
+	LongestStreak          int32
+	StreakMessage          string
+}
 
 func extractFromInput(input string, api_key string) (string, int, error) {
 	client := openai.NewClient(api_key)
@@ -41,7 +55,7 @@ func extractFromInput(input string, api_key string) (string, int, error) {
 	matches := re.FindStringSubmatch(response.Choices[0].Message.Content)
 
 	if len(matches) < 2 {
-		return "", 0, fmt.Errorf("invalid input")
+		return "", 0, fmt.Errorf("Invalid input")
 	}
 
 	activity := matches[1]
@@ -81,10 +95,10 @@ func compareActivities(extractedActivity string, databaseActivity string) (bool,
 }
 
 type MatchedActivities struct {
-	MatchedActivities []Activity  `json:"matched_activities"`
-	Duration          int         `json:"duration"`
-	Description       string      `json:"description"`
-	Name              interface{} `json:"name"`
+	MatchedActivities []Activity `json:"matched_activities"`
+	Duration          int        `json:"duration"`
+	Description       string     `json:"description"`
+	Name              string     `json:"name"`
 }
 
 func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -94,6 +108,7 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 	params := parameters{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&params)
+
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error in parsing json: %s", err))
 		return
@@ -153,23 +168,64 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 			respondWithError(w, 400, fmt.Sprintf("Error setting activity log: %v", err))
 			return
 		}
-		isGoalCompleted := totalPoints > goalPoints
-		totalPoints = totalPoints + int32(roundedPoints)
-		if totalPoints > goalPoints && !isGoalCompleted {
-			stopChan <- struct{}{}
-			err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
-			if err != nil {
-				respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
-				return
+
+		dailyPoints, err := apiCfg.DB.GetDailyPoints(r.Context(), user.ID)
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error getting daily points: %v", err))
+			return
+		}
+
+		if dailyPoints.GoalPoints > 0 {
+			isGoalCompleted := dailyPoints.TotalPoints > dailyPoints.GoalPoints
+			dailyPoints.TotalPoints = dailyPoints.TotalPoints + int32(roundedPoints)
+			if dailyPoints.TotalPoints > dailyPoints.GoalPoints && !isGoalCompleted {
+				stopChan <- struct{}{}
+				err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
+				if err != nil {
+					respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
+					return
+				}
+			}
+			if dailyPoints.GoalPoints > dailyPoints.TotalPoints && isGoalCompleted {
+				err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
+				if err != nil {
+					respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+					return
+				}
+				startGoalTracker(user.ID, user.Email)
 			}
 		}
-		if goalPoints > totalPoints && isGoalCompleted {
-			err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
-			if err != nil {
-				respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+
+		dailyActivityLogCount, err := apiCfg.DB.GetDailyActivityLogsCount(r.Context(), user.ID)
+		if err != nil {
+			log.Printf("Error getting daily activity logs count: %s", err)
+		}
+
+		if dailyActivityLogCount == 1 {
+			streakInfo, err := apiCfg.DB.GetStreakData(r.Context(), user.ID)
+			if err != nil && err != sql.ErrNoRows {
+				respondWithError(w, 400, fmt.Sprintf("Error getting streak info: %v", err))
 				return
 			}
-			startGoalTracker(user.ID, user.Email)
+			yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+			if streakInfo.LastLoggedDate.Valid && streakInfo.LastLoggedDate.Time.Format("2006-01-02") == yesterday {
+				streakInfo.CurrentStreak += 1
+			} else {
+				streakInfo.CurrentStreak = 1
+			}
+			if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+				streakInfo.LongestStreak = streakInfo.CurrentStreak
+			}
+			err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
+				UserID:         user.ID,
+				CurrentStreak:  streakInfo.CurrentStreak,
+				LongestStreak:  streakInfo.LongestStreak,
+				LastLoggedDate: sql.NullTime{Valid: true, Time: time.Now()},
+			})
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
+				return
+			}
 		}
 		respondWithJson(w, 200, MatchedActivities{MatchedActivities: matchedActivities})
 		return
@@ -217,25 +273,66 @@ func (apiCfg *apiConfig) SetSpecificActivityLog(w http.ResponseWriter, r *http.R
 		respondWithError(w, 400, fmt.Sprintf("Error setting activity log: %v", err))
 		return
 	}
-	isGoalCompleted := totalPoints > goalPoints
-	totalPoints = totalPoints + int32(roundedPoints)
-	if totalPoints > goalPoints && !isGoalCompleted {
-		stopChan <- struct{}{}
-		err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
-		if err != nil {
-			respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
-			return
-		}
+
+	dailyPoints, err := apiCfg.DB.GetDailyPoints(r.Context(), user.ID)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error getting daily points: %v", err))
 		return
 	}
-	if goalPoints > totalPoints && isGoalCompleted {
-		err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
-		if err != nil {
-			respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+
+	if dailyPoints.GoalPoints > 0 {
+		isGoalCompleted := dailyPoints.TotalPoints > dailyPoints.GoalPoints
+		dailyPoints.TotalPoints = dailyPoints.TotalPoints + int32(roundedPoints)
+		if dailyPoints.TotalPoints > dailyPoints.GoalPoints && !isGoalCompleted {
+			stopChan <- struct{}{}
+			err := apiCfg.DB.SetGoalCompleted(r.Context(), user.ID)
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error setting goal completed: %v", err))
+				return
+			}
 			return
 		}
-		startGoalTracker(user.ID, user.Email)
+		if dailyPoints.GoalPoints > dailyPoints.TotalPoints && isGoalCompleted {
+			err := apiCfg.DB.SetGoalUnCompleted(r.Context(), user.ID)
+			if err != nil {
+				respondWithError(w, 400, fmt.Sprintf("Error setting goal uncompleted: %v", err))
+				return
+			}
+			startGoalTracker(user.ID, user.Email)
+		}
 	}
+	dailyActivityLogCount, err := apiCfg.DB.GetDailyActivityLogsCount(r.Context(), user.ID)
+	if err != nil {
+		log.Printf("Error getting daily activity logs count: %s", err)
+	}
+
+	if dailyActivityLogCount == 1 {
+		streakInfo, err := apiCfg.DB.GetStreakData(r.Context(), user.ID)
+		if err != nil && err != sql.ErrNoRows {
+			respondWithError(w, 400, fmt.Sprintf("Error getting streak info: %v", err))
+			return
+		}
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+		if streakInfo.LastLoggedDate.Valid && streakInfo.LastLoggedDate.Time.Format("2006-01-02") == yesterday {
+			streakInfo.CurrentStreak += 1
+		} else {
+			streakInfo.CurrentStreak = 1
+		}
+		if streakInfo.CurrentStreak > streakInfo.LongestStreak {
+			streakInfo.LongestStreak = streakInfo.CurrentStreak
+		}
+		err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
+			UserID:         user.ID,
+			CurrentStreak:  streakInfo.CurrentStreak,
+			LongestStreak:  streakInfo.LongestStreak,
+			LastLoggedDate: sql.NullTime{Valid: true, Time: time.Now()},
+		})
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
+			return
+		}
+	}
+
 }
 
 func (apiCfg *apiConfig) GetDailyActivityLogs(w http.ResponseWriter, r *http.Request, user database.User) {
@@ -247,11 +344,83 @@ func (apiCfg *apiConfig) GetDailyActivityLogs(w http.ResponseWriter, r *http.Req
 	respondWithJson(w, 200, databaseActivityLogsToActivityLogs(dailyLogs))
 }
 
-func (apiCfg *apiConfig) GetDailyPoints(w http.ResponseWriter, r *http.Request, user database.User) {
+func (apiCfg *apiConfig) GetDailyStats(w http.ResponseWriter, r *http.Request, user database.User) {
 	points, err := apiCfg.DB.GetDailyPoints(r.Context(), user.ID)
+	var message string
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("Error getting daily activity points: %v", err))
+		respondWithError(w, 400, fmt.Sprintf("Error getting daily points: %v", err))
 		return
 	}
-	respondWithJson(w, 200, DatabaseDailyPointsToDailyPoints(points))
+	dailyTime, err := apiCfg.DB.GetDailyProductiveTime(r.Context(), user.ID)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error getting daily productivity time: %v", err))
+		return
+	}
+	recentActivities, err := apiCfg.DB.GetRecentActivities(r.Context(), user.ID)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error getting recent activities: %v", err))
+		return
+	}
+	dailyActivityLogsCount, err := apiCfg.DB.GetDailyActivityLogsCount(r.Context(), user.ID)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error getting daily activity logs count: %v", err))
+		return
+	}
+	yesterday := time.Now().AddDate(0, 0, -1)
+	streakInfo, err := apiCfg.DB.GetStreakData(r.Context(), user.ID)
+	if err == sql.ErrNoRows {
+		dbDailyStats := DBDailyStats{
+			TotalPoints:            points.TotalPoints,
+			GoalPoints:             points.GoalPoints,
+			DailyProductiveTime:    dailyTime,
+			RecentActivities:       recentActivities,
+			DailyActivityLogsCount: dailyActivityLogsCount,
+			CurrentStreak:          0,
+			LongestStreak:          0,
+			StreakMessage:          "Welcome here ! You can start a productivity streak by setting activities daily!🚀",
+		}
+		respondWithJson(w, 200, DatabaseDailyStatsToDailyStats(dbDailyStats))
+		return
+	} else if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error getting streak info: %v", err))
+		return
+	}
+	if streakInfo.LastLoggedDate.Time.Format("2006-01-02") < yesterday.Format("2006-01-02") && streakInfo.CurrentStreak != 0 {
+		streakInfo.CurrentStreak = 0
+		err = apiCfg.DB.UpdateStreakData(r.Context(), database.UpdateStreakDataParams{
+			UserID:         user.ID,
+			CurrentStreak:  streakInfo.CurrentStreak,
+			LongestStreak:  streakInfo.LongestStreak,
+			LastLoggedDate: sql.NullTime{Valid: true, Time: time.Now()},
+		})
+		if err != nil {
+			respondWithError(w, 400, fmt.Sprintf("Error updating streak info: %v", err))
+			return
+		}
+		message = "😔 Oops, your streak ended yesterday. But every day is a new opportunity! Start fresh today and build it back up! 🌟💪"
+	}
+
+	if streakInfo.LastLoggedDate.Time.Format("2006-01-02") < yesterday.Format("2006-01-02") {
+		message = "😢 Oh no, your streak is at 0! But guess what? Today is a new chance to start strong! 🌟 Dive back in and build it up! 💪"
+	}
+
+	if streakInfo.LastLoggedDate.Time.Format("2006-01-02") == time.Now().Format("2006-01-02") {
+		message = "🎉 You're on a roll! You've completed your daily streak today! Keep up the amazing work! 🔥💪"
+	}
+
+	if streakInfo.LastLoggedDate.Time.Format("2006-01-02") == yesterday.Format("2006-01-02") {
+		message = "🔥 You're on a streak! Don't forget to log an activity today to keep it going! You’ve got this! 💪✨"
+	}
+
+	dbDailyStats := DBDailyStats{
+		TotalPoints:            points.TotalPoints,
+		GoalPoints:             points.GoalPoints,
+		DailyProductiveTime:    dailyTime,
+		RecentActivities:       recentActivities,
+		DailyActivityLogsCount: dailyActivityLogsCount,
+		CurrentStreak:          streakInfo.CurrentStreak,
+		LongestStreak:          streakInfo.LongestStreak,
+		StreakMessage:          message,
+	}
+	respondWithJson(w, 200, DatabaseDailyStatsToDailyStats(dbDailyStats))
 }

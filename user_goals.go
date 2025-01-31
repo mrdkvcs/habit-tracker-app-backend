@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/joho/godotenv"
-	"github.com/mrdkvcs/go-base-backend/internal/database"
+	"log"
 	"net/http"
 	"net/smtp"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	"github.com/mrdkvcs/go-base-backend/internal/database"
 )
 
 var (
@@ -41,7 +44,6 @@ func (apiCfg *apiConfig) SetProductivityGoal(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, 400, fmt.Sprintf("Error setting productivity goal: %v", err))
 		return
 	}
-	goalPoints = params.GoalPoints
 	respondWithJson(w, 200, "Productivity goal successfully set")
 	startGoalTracker(user.ID, user.Email)
 }
@@ -68,7 +70,7 @@ func startGoalTracker(userId uuid.UUID, userEmail string) {
 					mu.Unlock()
 					return
 				}
-				sendUserReminder(userEmail)
+				apiconfig.sendUserReminder(userEmail, userId)
 			case <-stopChan:
 				ticker.Stop()
 				mu.Lock()
@@ -79,8 +81,13 @@ func startGoalTracker(userId uuid.UUID, userEmail string) {
 		}
 	}()
 }
-func sendUserReminder(userEmail string) {
-	sendEmail(userEmail, goalPoints, totalPoints)
+func (apiCfg *apiConfig) sendUserReminder(userEmail string, userId uuid.UUID) {
+	dailyPoints, err := apiCfg.DB.GetDailyPoints(context.Background(), userId)
+	if err != nil {
+		log.Println("Error getting user ' s dailyPoints")
+		return
+	}
+	sendEmail(userEmail, dailyPoints.GoalPoints, dailyPoints.GoalPoints)
 }
 
 func sendEmail(userEmail string, goalPoints, totalPoints int32) {

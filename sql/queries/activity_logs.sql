@@ -26,14 +26,37 @@ SELECT activity_id , ua.name ,  duration , user_activity_logs.points , activity_
 -- name: GetDailyPoints :one
 --
 SELECT 
-  COALESCE((SELECT SUM(ual.points) 
+  CAST(COALESCE((SELECT SUM(ual.points) 
             FROM user_activity_logs ual 
             WHERE ual.user_id = $1 
-              AND DATE(ual.logged_at) = CURRENT_DATE), 0) AS total_points,
-  COALESCE((SELECT g.goal_points 
+              AND DATE(ual.logged_at) = CURRENT_DATE), 0) AS INTEGER) AS total_points,
+  CAST(COALESCE((SELECT g.goal_points 
             FROM user_goals g 
             WHERE g.user_id = $1 
-              AND DATE(g.goal_date) = CURRENT_DATE), 0) AS goal_points;
+              AND DATE(g.created_at) = CURRENT_DATE), 0) AS INTEGER) AS goal_points;
+
+
+-- name: GetDailyProductiveTime :one 
+--
+SELECT 
+    CAST(COALESCE(SUM(CASE WHEN points > 0 THEN duration ELSE 0 END) , 0) AS INTEGER) AS productive_time,
+    CAST(COALESCE(SUM(CASE WHEN points < 0 THEN duration ELSE 0 END), 0) AS INTEGER) AS unproductive_time
+FROM 
+    user_activity_logs
+WHERE 
+    DATE(logged_at) = CURRENT_DATE 
+    AND user_id = $1;
+
+-- name: GetRecentActivities :many
+
+SELECT duration , user_activity_logs.points , activity_description, ua.name   FROM user_activity_logs LEFT JOIN user_activities ua ON ua.id = user_activity_logs.activity_id WHERE user_activity_logs.user_id = $1 AND DATE(logged_at) = CURRENT_DATE ORDER BY logged_at DESC LIMIT 3;
+
+-- name: GetDailyActivityLogsCount :one
+--
+SELECT COUNT(*) as daily_activity_count
+FROM user_activity_logs
+WHERE user_id = $1 
+AND DATE(logged_at) = CURRENT_DATE;
 
 -- name: EditActivity :exec
 --
