@@ -36,6 +36,9 @@ Examples:
 "Played chess for 1 hour" → Activity: Chess, Duration: 60 (This is a custom activity)
 
 Ensure the input is translated into English first before extracting the activity and duration.
+
+If the input includes multiple activities and multiple durations you should give back the output like this : 
+Activity1:{activity1},Duration1:{duration1},Activity2:{activity2},Duration2:{duration2},ActivityN:{activityN},DurationN:{durationN}.
 `
 
 var compareSystemInstruction = `
