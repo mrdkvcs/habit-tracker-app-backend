@@ -6,6 +6,31 @@ import (
 	"time"
 )
 
+type ActivityRow interface {
+	GetID() uuid.UUID
+	GetName() string
+	GetPoints() int32
+	GetActivityType() string
+}
+
+type GetActivitiesRowWrapper struct {
+	database.GetActivitiesRow
+}
+
+func (g GetActivitiesRowWrapper) GetID() uuid.UUID        { return g.ID }
+func (g GetActivitiesRowWrapper) GetName() string         { return g.Name }
+func (g GetActivitiesRowWrapper) GetPoints() int32        { return g.Points }
+func (g GetActivitiesRowWrapper) GetActivityType() string { return g.ActivityType }
+
+type SetActivityRowWrapper struct {
+	database.SetActivityRow
+}
+
+func (s SetActivityRowWrapper) GetID() uuid.UUID        { return s.ID }
+func (s SetActivityRowWrapper) GetName() string         { return s.Name }
+func (s SetActivityRowWrapper) GetPoints() int32        { return s.Points }
+func (s SetActivityRowWrapper) GetActivityType() string { return s.ActivityType }
+
 type User struct {
 	ID           uuid.UUID   `json:"id"`
 	CreatedAt    time.Time   `json:"created_at"`
@@ -339,8 +364,8 @@ func databaseActivitiesToActivities(dbAccs []database.GetActivitiesRow) []Activi
 	}
 	return activities
 }
-func databaseActivityToActivity(dbAcc database.GetActivitiesRow) Activity {
-	return Activity{ActivityID: dbAcc.ID, Name: dbAcc.Name, Points: dbAcc.Points, Type: dbAcc.ActivityType}
+func databaseActivityToActivity(dbAcc ActivityRow) Activity {
+	return Activity{ActivityID: dbAcc.GetID(), Name: dbAcc.GetName(), Points: dbAcc.GetPoints(), Type: dbAcc.GetActivityType()}
 }
 
 func databaseUserToUser(dbuser database.User) User {

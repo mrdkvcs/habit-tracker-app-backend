@@ -142,7 +142,7 @@ type UserActivity struct {
 	UserID       uuid.UUID
 	Name         string
 	Points       int32
-	ActivityType interface{}
+	ActivityType string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }

@@ -253,7 +253,7 @@ func (q *Queries) GetRecentActivities(ctx context.Context, userID uuid.UUID) ([]
 }
 
 const setActivity = `-- name: SetActivity :one
-INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 ) RETURNING id, user_id, name, points, activity_type, created_at, updated_at
+INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 ) RETURNING id , name , points , activity_type
 `
 
 type SetActivityParams struct {
@@ -264,7 +264,14 @@ type SetActivityParams struct {
 	ActivityType string
 }
 
-func (q *Queries) SetActivity(ctx context.Context, arg SetActivityParams) (UserActivity, error) {
+type SetActivityRow struct {
+	ID           uuid.UUID
+	Name         string
+	Points       int32
+	ActivityType string
+}
+
+func (q *Queries) SetActivity(ctx context.Context, arg SetActivityParams) (SetActivityRow, error) {
 	row := q.db.QueryRowContext(ctx, setActivity,
 		arg.ID,
 		arg.UserID,
@@ -272,15 +279,12 @@ func (q *Queries) SetActivity(ctx context.Context, arg SetActivityParams) (UserA
 		arg.Points,
 		arg.ActivityType,
 	)
-	var i UserActivity
+	var i SetActivityRow
 	err := row.Scan(
 		&i.ID,
-		&i.UserID,
 		&i.Name,
 		&i.Points,
 		&i.ActivityType,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }

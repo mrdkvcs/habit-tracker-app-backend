@@ -32,7 +32,7 @@ func (apiCfg *apiConfig) SetActivity(w http.ResponseWriter, r *http.Request, use
 		respondWithError(w, 400, fmt.Sprintf("Error decoding parameters: %v", err))
 		return
 	}
-	_, err = apiCfg.DB.SetActivity(r.Context(), database.SetActivityParams{
+	activity, err := apiCfg.DB.SetActivity(r.Context(), database.SetActivityParams{
 		ID:           uuid.New(),
 		UserID:       user.ID,
 		Name:         params.Name,
@@ -43,6 +43,7 @@ func (apiCfg *apiConfig) SetActivity(w http.ResponseWriter, r *http.Request, use
 		respondWithError(w, 400, fmt.Sprintf("Error setting activity: %v", err))
 		return
 	}
+	respondWithJson(w, 200, databaseActivityToActivity(SetActivityRowWrapper{activity}))
 }
 
 func (apiCfg *apiConfig) DeleteActivity(w http.ResponseWriter, r *http.Request) {

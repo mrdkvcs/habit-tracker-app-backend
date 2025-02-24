@@ -15,7 +15,7 @@ VALUES
 SELECT id , name , points , activity_type FROM user_activities WHERE user_id = $1 ORDER BY points DESC;
 
 -- name: SetActivity :one
-INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 ) RETURNING *;
+INSERT INTO user_activities (id , user_id , name , points , activity_type ) VALUES ($1 , $2 , $3 , $4 , $5 ) RETURNING id , name , points , activity_type;
 
 -- name: SetActivityLog :exec
 INSERT INTO user_activity_logs (id , user_id , activity_id , duration , points , logged_at , activity_description  ) VALUES ($1 , $2 , $3 , $4 , $5 , $6 , $7  ); 

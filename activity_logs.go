@@ -160,7 +160,7 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 			}
 			if match {
 				matchCounter += 1
-				matchedActivities = append(matchedActivities, databaseActivityToActivity(dbactivity))
+				matchedActivities = append(matchedActivities, databaseActivityToActivity(GetActivitiesRowWrapper{dbactivity}))
 			}
 		}
 		if matchCounter == 1 {
@@ -275,7 +275,7 @@ func (apiCfg *apiConfig) SetActivityLog(w http.ResponseWriter, r *http.Request, 
 				respondWithError(w, 400, fmt.Sprintf("Error comparing activities : %s", err))
 			}
 			if match {
-				matchedActivities = append(matchedActivities, databaseActivityToActivity(dbActivity))
+				matchedActivities = append(matchedActivities, databaseActivityToActivity(GetActivitiesRowWrapper{dbActivity}))
 				matchCounter += 1
 			}
 		}
