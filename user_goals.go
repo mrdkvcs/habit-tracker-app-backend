@@ -44,7 +44,8 @@ func (apiCfg *apiConfig) SetProductivityGoal(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, 400, fmt.Sprintf("Error setting productivity goal: %v", err))
 		return
 	}
-	respondWithJson(w, 200, "Productivity goal successfully set")
+	dailyPoints, err := apiCfg.DB.GetDailyPoints(context.Background(), user.ID)
+	respondWithJson(w, 200, databaseDailyPointsToDailyPoints(dailyPoints))
 	startGoalTracker(user.ID, user.Email)
 }
 

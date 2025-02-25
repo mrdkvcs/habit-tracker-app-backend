@@ -120,6 +120,11 @@ type DailyStats struct {
 	StreakMessage          string              `json:"streak_message"`
 }
 
+type DailyPoints struct {
+	TotalPoints int32 `json:"total_points"`
+	GoalPoints  int32 `json:"goal_points"`
+}
+
 type Team struct {
 	ID           uuid.UUID `json:"id"`
 	Name         string    `json:"team_name"`
@@ -328,6 +333,13 @@ func DatabaseDailyStatsToDailyStats(DBDailyStats DBDailyStats) DailyStats {
 		CurrentStreak:          DBDailyStats.CurrentStreak,
 		LongestStreak:          DBDailyStats.LongestStreak,
 		StreakMessage:          DBDailyStats.StreakMessage,
+	}
+}
+
+func databaseDailyPointsToDailyPoints(dbDailyPoints database.GetDailyPointsRow) DailyPoints {
+	return DailyPoints{
+		TotalPoints: dbDailyPoints.TotalPoints,
+		GoalPoints:  dbDailyPoints.GoalPoints,
 	}
 }
 
